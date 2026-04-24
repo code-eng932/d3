@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Onboarding, OnboardingData } from "@/component/d3/Onboarding";
 import { D3Provider } from "@/component/d3/D3Content";
+import { useD3 } from "@/component/d3/D3Content";
 import { AppShell } from "@/component/d3/AppShell";
 import { DashboardPage } from "@/component/d3/pages/DashboardPage";
 import { ActivitiesPage } from "@/component/d3/pages/ActivitiesPage";
@@ -11,8 +12,9 @@ import { BlockingPage } from "@/component/d3/pages/BlockingPage";
 import { ReflectionPage } from "@/component/d3/pages/ReflectionPage";
 import { FocusSessionPage } from "@/component/d3/pages/FocusSessionPage";
 import { QuickResetPage } from "@/component/d3/pages/QuickResetPage";
+import { BehavioralMirror } from "@/pages/BehavioralMirror";
 import { Intervention } from "@/component/d3/Intervention";
-import { api } from "@/lib/api";
+import { api, interventionApi, type InterventionPayload } from "@/lib/api";
 
 const defaultOnboardingData: OnboardingData = {
   name: "",
@@ -36,9 +38,16 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
 };
 
 const DISTRACTING_ROUTES = new Set(["/dashboard", "/activities", "/analytics", "/blocking", "/reflection"]);
+const MODE_INTERACTION_THRESHOLD: Record<"easy" | "moderate" | "extreme", number> = {
+  easy: 35,
+  moderate: 20,
+  extreme: 12,
+};
 
 const InnerApp = () => {
+  const { data, appLimits } = useD3();
   const [intervene, setIntervene] = useState(false);
+  const [activeIntervention, setActiveIntervention] = useState<InterventionPayload | null>(null);
   const [todayScreenMinutes, setTodayScreenMinutes] = useState(0);
   const interactionCountRef = useRef(0);
   const navigate = useNavigate();
@@ -47,6 +56,9 @@ const InnerApp = () => {
   const path = location.pathname;
   const token = localStorage.getItem("token");
   const isDistractingRoute = DISTRACTING_ROUTES.has(path);
+  const hasActiveBlocking = appLimits.some((limit) => limit.enabled);
+  const currentMode = (data.mode || "easy") as "easy" | "moderate" | "extreme";
+  const interactionThreshold = MODE_INTERACTION_THRESHOLD[currentMode];
 
   useEffect(() => {
     if (!token) return;
@@ -66,7 +78,7 @@ const InnerApp = () => {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !isDistractingRoute) return;
+    if (!token || !isDistractingRoute || !hasActiveBlocking) return;
 
     const intervalId = setInterval(() => {
       setTodayScreenMinutes((prev) => {
@@ -86,7 +98,41 @@ const InnerApp = () => {
     }, 60000);
 
     return () => clearInterval(intervalId);
-  }, [token, isDistractingRoute]);
+  }, [token, isDistractingRoute, hasActiveBlocking]);
+
+  useEffect(() => {
+    if (!token) return;
+    const intervalId = setInterval(() => {
+      void interventionApi
+        .pending()
+        .then((response) => {
+          if (!response.intervention || response.intervention.status !== "pending") return;
+          setActiveIntervention((existing) => {
+            if (existing?.interventionId === response.intervention?._id) return existing;
+            return {
+              interventionId: response.intervention._id,
+              mode: response.intervention.mode,
+              action: response.intervention.mode === "lock" ? "FORCE_FOCUS" : response.intervention.mode === "gentle" ? "SHOW_REMINDER" : "SHOW_TASK",
+              task: {
+                type: response.intervention.taskType,
+                icon: "🌿",
+                title: response.intervention.taskAssigned || "Mindful Break",
+                description: "Take a short mindful break before continuing.",
+                durationSeconds: 60,
+                category: "mindfulness",
+              },
+              message: `You've been on ${response.intervention.triggerApp} for a while. Time for a reset.`,
+              pomodoroMinutes: 25,
+            };
+          });
+          setIntervene(true);
+        })
+        .catch(() => {
+          // ignore background polling failures
+        });
+    }, 20000);
+    return () => clearInterval(intervalId);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -94,12 +140,23 @@ const InnerApp = () => {
       interactionCountRef.current = 0;
       return;
     }
-    if (!isDistractingRoute) return;
+    if (!isDistractingRoute || !hasActiveBlocking) return;
 
     const handleInteraction = () => {
       interactionCountRef.current += 1;
-      if (interactionCountRef.current >= 35 && !intervene) {
-        setIntervene(true);
+      if (interactionCountRef.current >= interactionThreshold && !intervene) {
+        void interventionApi
+          .trigger({
+            appName: path.replace("/", "") || "screen",
+            continuousMinutes: Math.max(1, Math.round(todayScreenMinutes)),
+          })
+          .then((payload) => {
+            setActiveIntervention(payload);
+            setIntervene(true);
+          })
+          .catch(() => {
+            setIntervene(true);
+          });
         interactionCountRef.current = 0;
       }
     };
@@ -115,17 +172,18 @@ const InnerApp = () => {
       window.removeEventListener("keydown", handleInteraction);
       window.removeEventListener("touchstart", handleInteraction);
     };
-  }, [token, path, intervene, isDistractingRoute]);
+  }, [token, path, intervene, isDistractingRoute, hasActiveBlocking, interactionThreshold, todayScreenMinutes]);
 
   return (
     <AppShell>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-        <Route path="/activities" element={<ActivitiesPage />} />
+        <Route path="/activities" element={<ProtectedRoute><ActivitiesPage /></ProtectedRoute>} />
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/blocking" element={<BlockingPage />} />
+        <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
+        <Route path="/mirror" element={<ProtectedRoute><BehavioralMirror /></ProtectedRoute>} />
+        <Route path="/blocking" element={<ProtectedRoute><BlockingPage /></ProtectedRoute>} />
         <Route path="/reflection" element={<ProtectedRoute><ReflectionPage /></ProtectedRoute>} />
         <Route path="/focus" element={<ProtectedRoute><FocusSessionPage /></ProtectedRoute>} />
         <Route path="/reset" element={<QuickResetPage />} />
@@ -133,9 +191,46 @@ const InnerApp = () => {
 
       {intervene && (
         <Intervention
-          onClose={() => setIntervene(false)}
-          onBreak={() => { setIntervene(false); navigate("/reset"); }}
-          onExit={() => { setIntervene(false); navigate("/focus"); }}
+          intervention={activeIntervention}
+          onClose={() => {
+            // Easy mode allows dismissing intervention overlays.
+            if (currentMode === "easy") {
+              setIntervene(false);
+              setActiveIntervention(null);
+            } else {
+              navigate("/reset");
+            }
+          }}
+          onBreak={() => {
+            setIntervene(false);
+            setActiveIntervention(null);
+            navigate("/reset");
+          }}
+          onCompleteTask={() => {
+            if (activeIntervention?.interventionId) {
+              void interventionApi.complete(activeIntervention.interventionId).catch((error) => {
+                console.error("Failed to complete intervention:", error);
+              });
+            }
+            setIntervene(false);
+            const shouldFocus = activeIntervention?.mode === "lock" || activeIntervention?.task?.type === "pomodoro";
+            setActiveIntervention(null);
+            navigate(shouldFocus ? "/focus" : "/dashboard");
+          }}
+          onSkipTask={() => {
+            if (activeIntervention?.interventionId) {
+              void interventionApi.skip(activeIntervention.interventionId).catch((error) => {
+                console.error("Failed to skip intervention:", error);
+              });
+            }
+            setIntervene(false);
+            setActiveIntervention(null);
+          }}
+          onExit={() => {
+            setIntervene(false);
+            setActiveIntervention(null);
+            navigate(currentMode === "extreme" ? "/focus" : "/dashboard");
+          }}
         />
       )}
     </AppShell>
@@ -143,6 +238,7 @@ const InnerApp = () => {
 };
 
 const Index = () => {
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"));
   const [data, setData] = useState<OnboardingData | null>(() => {
     const cached = localStorage.getItem("d3.onboarding.v1");
     if (!cached) return null;
@@ -156,7 +252,18 @@ const Index = () => {
   const handleComplete = (d: OnboardingData) => {
     localStorage.setItem("d3.onboarding.v1", JSON.stringify(d));
     setData(d);
+    setToken(localStorage.getItem("token"));
   };
+
+  useEffect(() => {
+    const syncAuth = () => setToken(localStorage.getItem("token"));
+    window.addEventListener("storage", syncAuth);
+    window.addEventListener("d3-auth-changed", syncAuth as EventListener);
+    return () => {
+      window.removeEventListener("storage", syncAuth);
+      window.removeEventListener("d3-auth-changed", syncAuth as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (data) return;
@@ -187,7 +294,9 @@ const Index = () => {
     void bootstrapFromProfile();
   }, [data]);
 
-  if (!data) return <Onboarding onComplete={handleComplete} />;
+  // Render onboarding whenever the user is logged out.
+  // This prevents redirect loops between "/" and protected routes.
+  if (!token || !data) return <Onboarding onComplete={handleComplete} />;
   return (
     <D3Provider initial={data}>
       <InnerApp />

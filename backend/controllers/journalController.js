@@ -1,4 +1,6 @@
 const JournalEntry = require("../models/JournalEntry");
+const dayjs = require("dayjs");
+const { recalculateScore } = require("../src/modules/score/score.service");
 
 const createJournalEntry = async (req, res) => {
   try {
@@ -6,6 +8,12 @@ const createJournalEntry = async (req, res) => {
       ...req.body,
       user: req.user.userId,
     });
+
+    try {
+      await recalculateScore(req.user.userId, dayjs().format("YYYY-MM-DD"));
+    } catch (scoreError) {
+      console.error("Score recalculate failed after journal save:", scoreError.message);
+    }
 
     return res.status(201).json({ message: "Journal entry created.", entry });
   } catch (error) {

@@ -8,28 +8,45 @@ import { useEffect, useState } from "react";
 import { Input } from "@/component/ui/input";
 import { toast } from "sonner";
 import { BackButton } from "../BackButton";
-import { api } from "@/lib/api";
+import { api, scoreApi, type ScoreOverview } from "@/lib/api";
 
 export const ProfilePage = () => {
   const { data, updateData, focusScore, screenTimeHours, mood, completedActivities, focusSessionsCompleted, breaksTaken, displayName, setDisplayName } = useD3();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(displayName);
+  const [scoreOverview, setScoreOverview] = useState<ScoreOverview | null>(null);
 
   useEffect(() => {
     const loadProfile = async () => {
       try {
-        const response = await api.get<{
-          profile?: {
-            ageRange?: string;
-            distractionTriggers?: string[];
-          };
-        }>("/onboarding");
+        const [response, scoreResponse] = await Promise.all([
+          api.get<{
+            profile?: {
+              ageRange?: string;
+              distractionTriggers?: string[];
+              sleepTime?: string;
+              mostDistractingApps?: string[];
+            };
+          }>("/onboarding"),
+          scoreApi.getOverview(),
+        ]);
 
         updateData({
           ageGroup: response.profile?.ageRange || data.ageGroup,
-          apps: response.profile?.distractionTriggers?.length ? response.profile.distractionTriggers : data.apps,
+          sleep: response.profile?.sleepTime || data.sleep,
+          apps:
+            response.profile?.distractionTriggers?.length
+              ? response.profile.distractionTriggers
+              : response.profile?.mostDistractingApps?.length
+                ? response.profile.mostDistractingApps
+                : data.apps,
         });
+        if (displayName === "Friend" && data.name) {
+          setDisplayName(data.name);
+          setName(data.name);
+        }
+        setScoreOverview(scoreResponse);
       } catch (error) {
         console.error("Failed to fetch profile:", error);
       }
@@ -43,13 +60,25 @@ export const ProfilePage = () => {
   const addiction = heavy ? "High" : "Moderate";
 
   const resetOnboarding = () => {
-    try { localStorage.removeItem("d3.onboarding.v1"); } catch { /* ignore */ }
-    window.location.href = "/";
+    try {
+      localStorage.removeItem("d3.onboarding.v1");
+      localStorage.removeItem("token");
+      window.dispatchEvent(new Event("d3-auth-changed"));
+    } catch {
+      // ignore
+    }
+    navigate("/", { replace: true });
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
-    window.location.href = "/";
+    try {
+      localStorage.removeItem("token");
+      localStorage.removeItem("d3.onboarding.v1");
+      window.dispatchEvent(new Event("d3-auth-changed"));
+    } catch {
+      // ignore
+    }
+    navigate("/", { replace: true });
   };
 
   return (
@@ -92,8 +121,8 @@ export const ProfilePage = () => {
           <Stat label="Sleep" value={data.sleep || "—"} />
           <Stat label="Activities" value={completedActivities.length.toString()} />
           <Stat label="Sessions" value={focusSessionsCompleted.toString()} />
-          <Stat label="Breaks" value={breaksTaken.toString()} />
-          <Stat label="Driver" value={data.scrollReason || "—"} />
+          <Stat label="Streak" value={`${scoreOverview?.streak ?? 0}d`} />
+          <Stat label="Level" value={scoreOverview?.level || data.scrollReason || "—"} />
         </div>
       </section>
 

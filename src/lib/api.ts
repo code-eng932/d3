@@ -66,3 +66,111 @@ export const api = {
     request<TResponse>(path, "PUT", body, options),
 };
 
+export type ScoreOverview = {
+  currentScore: number;
+  level: string;
+  levelEmoji: string;
+  levelColor: string;
+  streak: number;
+  longestStreak: number;
+  weeklyAvgScore: number;
+};
+
+export type ScoreHistoryEntry = {
+  date: string;
+  score: number;
+  delta: number;
+  reason: string;
+};
+
+export type ScoreStreak = {
+  streakDays: number;
+  longestStreakDays: number;
+  lastStreakDate: string | null;
+};
+
+export const scoreApi = {
+  getOverview: () => api.get<ScoreOverview>("/v1/score"),
+  getHistory: (days = 30) => api.get<{ history: ScoreHistoryEntry[] }>(`/v1/score/history?days=${days}`),
+  getStreak: () => api.get<ScoreStreak>("/v1/score/streak"),
+  recalculate: (date?: string) => api.post("/v1/score/recalculate", date ? { date } : {}),
+};
+
+export type InterventionTask = {
+  type: string;
+  icon: string;
+  title: string;
+  description: string;
+  durationSeconds: number;
+  category: string;
+  steps?: string[];
+};
+
+export type InterventionPayload = {
+  interventionId: string;
+  mode: "gentle" | "pause" | "lock";
+  action: "SHOW_REMINDER" | "SHOW_TASK" | "FORCE_FOCUS";
+  task: InterventionTask;
+  message: string;
+  pomodoroMinutes: number;
+};
+
+export type InterventionDoc = {
+  _id: string;
+  mode: "gentle" | "pause" | "lock";
+  triggerApp: string;
+  taskType: string;
+  taskAssigned?: string;
+  status: "pending" | "completed" | "skipped";
+  triggeredAt: string;
+};
+
+export const interventionApi = {
+  trigger: (body: { appName: string; continuousMinutes: number; sessionLogId?: string }) =>
+    api.post<InterventionPayload>("/v1/interventions/trigger", body),
+  complete: (id: string) => api.patch<{ success: boolean; scoreUpdate?: unknown }>(`/v1/interventions/${id}/complete`, {}),
+  skip: (id: string) => api.patch<{ success: boolean }>(`/v1/interventions/${id}/skip`, {}),
+  pending: () => api.get<{ intervention: InterventionDoc | null }>("/v1/interventions/pending"),
+  history: (page = 1, limit = 20) =>
+    api.get<{ interventions: InterventionDoc[]; total: number; page: number; totalPages: number }>(
+      `/v1/interventions/history?page=${page}&limit=${limit}`
+    ),
+};
+
+export type MirrorAnalysis = {
+  coreTrigger: {
+    label: string;
+    headline: string;
+    body: string;
+    icon: string;
+    severity: string;
+  };
+  patterns: Array<{
+    icon: string;
+    title: string;
+    body: string;
+    stat: string;
+    statLabel: string;
+    type: "warning" | "positive";
+  }>;
+  prescription: {
+    headline: string;
+    items: Array<{ icon: string; text: string }>;
+  };
+  closingLine: string;
+  meta?: {
+    avgDailyMinutes: number;
+    goalMetRate: number;
+    hoursReclaimed: number;
+    scoreImprovement: number;
+    moodTrend: string;
+    topApps: Array<{ appName: string; totalMinutes: number }>;
+    dataPoints: { journals: number; days: number; interventions: number };
+  };
+};
+
+export const mirrorApi = {
+  getAnalysis: () => api.get<{ success: boolean; data: MirrorAnalysis }>("/v1/mirror/analysis"),
+  refreshAnalysis: () => api.get<{ success: boolean; data: MirrorAnalysis }>("/v1/mirror/analysis/refresh"),
+};
+

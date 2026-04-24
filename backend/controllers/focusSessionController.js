@@ -1,5 +1,7 @@
 const FocusSession = require("../models/FocusSession");
 const User = require("../models/User");
+const dayjs = require("dayjs");
+const { recalculateScore } = require("../src/modules/score/score.service");
 
 const createFocusSession = async (req, res) => {
   try {
@@ -59,6 +61,12 @@ const updateFocusSession = async (req, res) => {
 
         user.lastFocusSessionDate = today;
         await user.save();
+      }
+
+      try {
+        await recalculateScore(req.user.userId, dayjs().format("YYYY-MM-DD"));
+      } catch (scoreError) {
+        console.error("Score recalculate failed after focus session completion:", scoreError.message);
       }
     }
 
