@@ -1,1 +1,38 @@
+# Dependencies
+node_modules/
 node_modules
+
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+
+# Vercel
+.vercel
+
+# Backend environment (project-specific)
+d3-app/backend/.env
+d3-app/backend/.env*
+d3-app/backend/node_modules
+d3-app/backend/dist/
