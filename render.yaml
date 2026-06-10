@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: d3-backend
+    env: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGO_URI
+        sync: false   # Set this in the Render dashboard — must be a MongoDB Atlas URI
+      - key: JWT_SECRET
+        sync: false   # Set this in the Render dashboard
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: FRONTEND_URL
+        value: https://d3-app-omega.vercel.app
+      - key: ANTHROPIC_API_KEY
+        sync: false   # Set this in the Render dashboard
