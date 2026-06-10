@@ -42,6 +42,21 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   return children;
 };
 
+// Shown when a token exists but onboarding data hasn't settled in state yet.
+// Without this, Index.tsx would re-mount <Onboarding> from step 0 during the
+// brief window between token storage and d3.onboarding.v1 being written.
+const LoadingScreen = () => (
+  <div className="min-h-screen bg-gradient-dawn flex items-center justify-center">
+    <div className="text-center">
+      <div
+        className="mx-auto mb-6 h-16 w-16 rounded-full bg-gradient-sky shadow-rest breathe"
+        aria-label="Loading"
+      />
+      <p className="text-muted-foreground text-sm animate-pulse">Loading your space…</p>
+    </div>
+  </div>
+);
+
 
 
 
@@ -339,9 +354,14 @@ const Index = () => {
     void bootstrapFromProfile();
   }, [data]);
 
-  // Render onboarding whenever the user is logged out.
-  // This prevents redirect loops between "/" and protected routes.
-  if (!token || !data) return <Onboarding onComplete={handleComplete} />;
+  // Show onboarding only when the user is genuinely logged out.
+  if (!token) return <Onboarding onComplete={handleComplete} />;
+
+  // Token exists but React state hasn't synced yet (brief transition after
+  // signup/login). Show a calm loading screen instead of re-mounting Onboarding,
+  // which would reset the flow back to step 0 and trap the user.
+  if (!data) return <LoadingScreen />;
+
   return (
     <D3Provider initial={data}>
       <InnerApp />
