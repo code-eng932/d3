@@ -28,6 +28,12 @@ Thumbs.db
 # Cache
 .cache/
 
+# Alternative package manager lock files (use npm/package-lock.json only)
+bun.lock
+bun.lockb
+yarn.lock
+pnpm-lock.yaml
+
 # Vercel
 .vercel
 
