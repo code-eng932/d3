@@ -110,17 +110,15 @@ export const Onboarding = ({ onComplete }: { onComplete: (data: OnboardingData) 
     let token: string | null = null;
 
     if (mode === "signin") {
+      // ── Sign-in flow ──────────────────────────────────────────────────────
       const loginResponse = await api.post<{ token: string; user?: { name?: string } }>(
         "/auth/login",
         { email: data.email, password: data.password },
         { requireAuth: false }
       );
       token = loginResponse.token;
-      if (!token) {
-        throw new Error("Unable to retrieve token from auth API.");
-      }
+      if (!token) throw new Error("Unable to retrieve token from auth API.");
 
-      // Persist token before any authenticated fetch (like /onboarding).
       localStorage.setItem("token", token);
       const userName = loginResponse.user?.name || "";
 
@@ -134,20 +132,15 @@ export const Onboarding = ({ onComplete }: { onComplete: (data: OnboardingData) 
             sleepTime?: string;
           };
         }>("/onboarding")
-        .catch(
-          () =>
-            ({
-              profile: undefined,
-            }) as {
-              profile?: {
-                ageRange?: string;
-                distractionTriggers?: string[];
-                dailyScreenTimeHours?: number;
-                mostDistractingApps?: string[];
-                sleepTime?: string;
-              };
-            }
-        );
+        .catch(() => ({ profile: undefined }) as {
+          profile?: {
+            ageRange?: string;
+            distractionTriggers?: string[];
+            dailyScreenTimeHours?: number;
+            mostDistractingApps?: string[];
+            sleepTime?: string;
+          };
+        });
 
       const profile = profileResponse.profile;
       const hydratedData: OnboardingData = {
@@ -155,54 +148,53 @@ export const Onboarding = ({ onComplete }: { onComplete: (data: OnboardingData) 
         name: userName,
         email: data.email,
         password: data.password,
-        ageGroup: profile.ageRange || "",
-        screenTime: mapHoursToRange(profile.dailyScreenTimeHours),
-        sleep: profile.sleepTime || "",
-        apps: normalizeApps(profile.distractionTriggers || profile.mostDistractingApps || []),
+        ageGroup: profile?.ageRange || "",
+        screenTime: mapHoursToRange(profile?.dailyScreenTimeHours),
+        sleep: profile?.sleepTime || "",
+        apps: normalizeApps(profile?.distractionTriggers || profile?.mostDistractingApps || []),
       };
-      onComplete(hydratedData);
-    } else {
-      const registerResponse = await api.post<{ token?: string }>(
-        "/auth/register",
-        { name: data.name, email: data.email, password: data.password },
-        { requireAuth: false }
-      );
-      token = registerResponse.token || null;
 
-      if (!token) {
-        const loginAfterRegister = await api.post<{ token: string }>(
-          "/auth/login",
-          { email: data.email, password: data.password },
-          { requireAuth: false }
-        );
-        token = loginAfterRegister.token;
-      }
+      // Store data in parent state/localStorage BEFORE dispatching auth event
+      // so syncAuth in Index.tsx finds d3.onboarding.v1 and doesn't reset to null.
+      onComplete(hydratedData);
+      window.dispatchEvent(new Event("d3-auth-changed"));
+
+      try { navigate("/dashboard"); } catch { window.location.href = "/dashboard"; }
+      return;
     }
+
+    // ── Sign-up flow ───────────────────────────────────────────────────────
+    const registerResponse = await api.post<{ token?: string }>(
+      "/auth/register",
+      { name: data.name, email: data.email, password: data.password },
+      { requireAuth: false }
+    );
+    token = registerResponse.token || null;
 
     if (!token) {
-      throw new Error("Unable to retrieve token from auth API.");
+      const loginAfterRegister = await api.post<{ token: string }>(
+        "/auth/login",
+        { email: data.email, password: data.password },
+        { requireAuth: false }
+      );
+      token = loginAfterRegister.token;
     }
 
-    // Sign-in already stored token before profile hydration.
-    if (mode !== "signin") {
-      localStorage.setItem("token", token);
-    }
+    if (!token) throw new Error("Unable to retrieve token from auth API.");
+
+    localStorage.setItem("token", token);
+
+    // Persist onboarding data to backend.
+    await api.put("/onboarding", data);
+
+    // ⚠️  FIX: Call onComplete (writes d3.onboarding.v1 to localStorage)
+    // BEFORE dispatching d3-auth-changed. When syncAuth runs it will find
+    // the data and correctly keep Index.tsx in its authenticated/loaded state
+    // instead of re-rendering <Onboarding> from step 0.
+    onComplete(data);
     window.dispatchEvent(new Event("d3-auth-changed"));
-    const persistedToken = localStorage.getItem("token");
-    if (!persistedToken) {
-      throw new Error("Token was not persisted to localStorage.");
-    }
 
-    if (mode === "signup") {
-      await api.put("/onboarding", data);
-      onComplete(data);
-    }
-
-    try {
-      navigate("/dashboard");
-    } catch {
-      window.location.href = "/dashboard";
-    }
+    try { navigate("/dashboard"); } catch { window.location.href = "/dashboard"; }
   };
 
   // Step 0: Brand intro — logo + name + Get Started
